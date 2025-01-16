@@ -89,12 +89,12 @@ VectorXd second_membre_schwarz(int Nx, int Ny, double dx, double dy, int Nr, int
         return B;
     } else {
         // Domaine 2 (droite)
-        VectorXd B((Nx2 + Nr-1) * (Ny-1));  // Correction de la dimension
+        VectorXd B((Nx-Nx2+ Nr-1) * (Ny-1));  // Correction de la dimension
         for (int j = 1; j < Ny; ++j) {
             for (int i = Nx2-Nr+1; i < Nx; ++i) {
                 double x = xmin + i * dx;
                 double y = ymin + j * dy;
-                int k = (j-1) * (Nx2 + Nr-1) + (i-(Nx2-Nr+1));  // Correction de l'indice
+                int k = (j-1) * (Nx-Nx2 + Nr-1) + (i-Nx2+Nr-1);
                 B(k) = source_terme(x, y);
                 
                 // Condition à l'interface gauche
@@ -132,7 +132,7 @@ double calcul_erreur_L2(const VectorXd& u_num, int Ny, int domain, int Nr, doubl
                 double x = xmin + i*dx;
                 double y = ymin + j*dy;
                 double u_exact = solution_exacte(x, y);
-                int k = (j-1) * (Nx2 + Nr-1) + (i -(Nx2-Nr+1));  // Correction de l'indice
+                int k = (j-1) * (Nx_total-Nx2 + Nr-1) + (i-Nx2+Nr-1);
                 if (k < u_num.size()) {  // Vérification de l'indice
                     error += pow(u_num(k) - u_exact, 2);
                 }
@@ -144,6 +144,7 @@ double calcul_erreur_L2(const VectorXd& u_num, int Ny, int domain, int Nr, doubl
 
 int main() {
     vector<int> N_values = {5, 10, 20, 40, 80};
+    // vector<int> N_values = {5};
     ofstream convergence1("convergence_domaine1.txt");
     ofstream convergence2("convergence_domaine2.txt");
     
@@ -156,7 +157,7 @@ int main() {
     
     for(int N : N_values) {
         int Nx = N, Ny = N;
-        int Nr = 1;
+        int Nr = 2;
         int *Ns = charge(Nx);
         int Nx1 = Ns[0];
         int Nx2 = Ns[1];
@@ -189,7 +190,7 @@ int main() {
 
         // Résolution sur les sous-domaines
         SparseMatrix<double> A1 = Matrice(Nx1 + Nr, Ny, alpha, beta, gamma);
-        SparseMatrix<double> A2 = Matrice(Nx2 + Nr, Ny, alpha, beta, gamma);
+        SparseMatrix<double> A2 = Matrice(Nx-Nx2+ Nr , Ny, alpha, beta, gamma);
         
         VectorXd f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, g1, g2);
         VectorXd f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, g1, g2);
