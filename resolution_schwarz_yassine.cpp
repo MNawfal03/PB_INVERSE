@@ -82,9 +82,9 @@ VectorXd second_membre_schwarz(int Nx, int Ny, double dx, double dy, int Nr, int
                 B(k) = source_terme(x, y);
                 
                 // Condition à l'interface droite
-                if (i == Nx1 + Nr - 1) {
-                    B(k) = -g2(j-1)/(dx*dx);  // Correction de l'indice
-                }
+                // if (i == Nx1 + Nr - 1) {
+                //     B(k) += -g2(j-1)/(dx*dx);  // Correction de l'indice
+                // }
             }
         }
         return B;
@@ -99,9 +99,9 @@ VectorXd second_membre_schwarz(int Nx, int Ny, double dx, double dy, int Nr, int
                 B(k) = source_terme(x, y);
                 
                 // Condition à l'interface gauche
-                if (i == Nx2-Nr+1) {
-                    B(k) = -g1(j-1)/(dx*dx);  // Correction de l'indice
-                }
+                // if (i == Nx2-Nr+1) {
+                //     B(k) += -g1(j-1)/(dx*dx);  // Correction de l'indice
+                // }
             }
         }
         return B;
@@ -143,44 +143,59 @@ double calcul_erreur_L2(const VectorXd& u_num, int Ny, int domain, int Nr, doubl
     return sqrt(error * dx * dy);
 }
 
-SparseMatrix<double> MatriceB1(int Nx, int Ny , double beta) {
-    int N = (Nx-1) * (Ny-1);
-    SparseMatrix<double> A(N, N);
-    std::vector<Triplet<double>> coefficients;
-    
-    for (int j = 1; j < Ny; ++j) {
-        for (int i = 1; i < Nx; ++i) {
-            int k = (j-1) * (Nx-1) + i-1;
-            if ( i == Nx-1) {
 
-                coefficients.emplace_back(k, k, beta);
-            }            
-        
-        }
-    }
+
+SparseMatrix<double> MatriceB1(int N1, int N2, int nr, int Ny, double beta) {
+    // Dimensions
+    int taille_ligne = (N1 + nr- 1) * (Ny - 1);
+    int taille_colonne = (Ny - 1);
+
+    SparseMatrix<double> J(taille_ligne, taille_colonne); // Matrice creuse
+    std::vector<Triplet<double>> coefficients; // Stocke les triplets non nuls
+
+    // Remplissage pour les Ny-1 premières lignes
     
-    A.setFromTriplets(coefficients.begin(), coefficients.end());
-    return A;
+    for(int ligne=N1+nr-2; ligne<(Ny - 1)*(N1+nr-1); ligne+=N1+nr-1){
+        int colonne = ligne/(N1+nr-1);               // Chaque bloc correspond à une colonne dans ce groupe
+            
+        coefficients.emplace_back(ligne, colonne, -beta);
+        // std::cout << "Ajout 1er bloc : ligne = " << ligne << ", colonne = " << colonne << ", valeur = " << -beta << "\n";
+            
+        }
+    
+
+
+    // Construction de la matrice à partir des triplets
+    J.setFromTriplets(coefficients.begin(), coefficients.end());
+    return J;
 }
 
 
-SparseMatrix<double> MatriceB2(int Nx, int Ny,double beta) {
-    int N = (Nx-1) * (Ny-1);
-    SparseMatrix<double> A(N, N);
-    std::vector<Triplet<double>> coefficients;
+
+SparseMatrix<double> MatriceB2(int N1, int N2, int nr, int Ny, double beta) {
+    // Dimensions
+    int taille_ligne = (N2 + nr- 1) * (Ny - 1);
+    int taille_colonne = (Ny - 1);
+
+    SparseMatrix<double> J(taille_ligne, taille_colonne); // Matrice creuse
+    std::vector<Triplet<double>> coefficients; // Stocke les triplets non nuls
+
     
-    for (int j = 1; j < Ny; ++j) {
-        for (int i = 1; i < Nx; ++i) {
-            int k = (j-1) * (Nx-1) + i-1;
-            if ( i == 1) {
-                coefficients.emplace_back(k, k, beta);
-            }            
+    // Remplissage du second bloc
+     for(int ligne=0; ligne<(Ny - 1)*(N2+nr-1); ligne+=N2+nr-1){
+        int colonne = (ligne/(N2+nr-1));  
+        // printf("ligne %d, colonne %d\n",ligne ,colonne);                       // Décalage des colonnes pour le deuxième bloc
+            
+        coefficients.emplace_back(ligne, colonne, -beta);
+        // std::cout << "Ajout 2ème bloc : ligne = " << ligne << ", colonne = " << colonne << ", valeur = " << -beta << "\n";
 
         }
-    }
+
+
     
-    A.setFromTriplets(coefficients.begin(), coefficients.end());
-    return A;
+     // Construction de la matrice à partir des triplets
+    J.setFromTriplets(coefficients.begin(), coefficients.end());
+    return J;
 }
 
 // Fonction pour créer une matrice résultante par concaténation horizontale
@@ -379,9 +394,10 @@ int main() {
         std :: cout << Nx1 << " " << Nx2 << " " << N1 << " " << N2 << std :: endl ;
         
     
-        SparseMatrix<double> B1 = MatriceB1(Nx1 + Nr, Ny, beta);
-        SparseMatrix<double> B2 = MatriceB2(Nx-Nx2+ Nr, Ny, beta);
+        SparseMatrix<double> B1 = MatriceB1( N1,  N2,  Nr,  Ny,  beta);
+        SparseMatrix<double> B2 = MatriceB2( N1,  N2,  Nr,  Ny,  beta);
         SparseMatrix<double> B = Matrice_globale(-B1 , -B2) ;
+        // afficherSparseMatrix(B2);
 
         // std::cout << "Dimensions de B (SparseMatrix): " << (B1).rows() << " x " << (B1).cols() << std::endl;
 
@@ -399,29 +415,28 @@ int main() {
 
 
 
-        SparseMatrix<double> Mf_sup = Matrice_globale_horizontale(M, B );
+        SparseMatrix<double> Mf_sup = Matrice_globale_horizontale(M, zero_1 );
         // SparseMatrix<double> Mf_inf = Matrice_globale_horizontale(zero_1, zero_2 );
         // SparseMatrix<double> Mf = empilerVerticalement(Mf_sup, Mf_inf );
         SparseMatrix<double> Mf = Mf_sup;
 
         SparseLU<SparseMatrix<double>> solver1, solver2;
-        // SparseLU<SparseMatrix<double>> solver1, solver2, solver;
 
-        std :: cout << " ici " << std :: endl ;
+        // std :: cout << " ici " << std :: endl ;
         solver1.compute(M1);
         solver2.compute(M2);
-        std :: cout << " ici " << std :: endl ;
+        // std :: cout << " ici " << std :: endl ;
 
 
 
-        VectorXd g1((Nx1 + Nr-1) * (Ny-1)), g2((Nx-Nx2+ Nr-1) * (Ny-1));  
+        VectorXd g1(Ny-1), g2(Ny-1);  
         for (int j = 1; j < Ny; ++j) {
             double x1 = xmin + (Nx1+Nr-1)*dx;
             double y = ymin + j*dy;
-            g1(j-1) = 1.;
+            g1(j-1) = 1e4;
             
             double x2 = xmin + (Nx2-Nr+1)*dx;
-            g2(j-1) = 2.;
+            g2(j-1) = 2e4;
         }
 
         VectorXd f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, g1, g2);
@@ -438,18 +453,22 @@ int main() {
         VectorXd Zero2((Nx1 + Nr-1) * (Ny-1)), Zero1((Nx-Nx2+ Nr-1) * (Ny-1));
 
         // Construction des conditions aux limites pour Schwarz
-        VectorXd g1_ex((Nx1 + Nr-1) * (Ny-1)), g2_ex((Nx-Nx2+ Nr-1) * (Ny-1)); 
+        VectorXd g1_ex((Ny-1)), g2_ex((Ny-1)); 
         for (int j = 1; j < Ny; ++j) {
             double x1 = xmin + (Nx1+Nr-1)*dx;
             double y = ymin + j*dy;
             g1_ex(j-1) = solution_exacte(x1,y);
+            // g1_ex(j-1) = 0.0;
             
             double x2 = xmin + (Nx2-Nr+1)*dx;
             g2_ex(j-1) = solution_exacte(x2,y);
+            // g2_ex(j-1) = 0.0;
         }
         
         VectorXd f1_ex = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, g1_ex, g2_ex);
         VectorXd f2_ex = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, g1_ex, g2_ex);
+        // VectorXd f1_ex = second_membre(N1+Nr, Ny, dx, dy);
+        // VectorXd f2_ex = second_membre(N2+Nr, Ny, dx, dy);
 
         // VectorXd C_sup = Concatener(f1_ex, f2_ex);
         VectorXd C_sup = Concatener(f1, f2);
@@ -474,21 +493,9 @@ int main() {
         }
 
 
-        solver.analyzePattern(Mf);  // Analyse du schéma de sparsité
-        solver.factorize(Mf);       // Factorisation LU
-
-        if (solver.info() != Eigen::Success) {
-            std::cerr << "Erreur de factorisation LU !" << std::endl;
-            return -1;
-        }
+    
         VectorXd X0 = solver.solve(C);
-        // std::cout << "Dimensions de U0 (VectorXd): " << X0.rows() << std::endl;
-
-
-        // std::cout << "Dimensions de f_ex: " << f1_ex.rows() + f2_ex.rows() << std::endl;
-
-
-        
+     
         solver1.compute(M1);
         solver2.compute(M2);
         
@@ -496,10 +503,47 @@ int main() {
         VectorXd u2_ex = solver2.solve(f2_ex);
 
 
-        VectorXd U_ex = Concatener(u1_ex, u2_ex); 
+        VectorXd U_ex = Concatener(u1_ex, u2_ex);
+        double cost;
+        for ( int i = 1 ; i < 2*(Nr-1) +1; i++){
+                for (int j = 1 ; j<Ny ; j++){
+                    int k1 = (j-1) * (N1+Nr -1) + (i ) + (N1-Nr); 
+                    int k2 = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-1);
+                    // printf("k1 = %d, k2 = %d \n", k1, k2);
+                    cost += (X0[k1] - X0[k2]) * (X0[k1] - X0[k2]); 
+                }
+        }
+
+        for ( int i = (N1+N2 +2*Nr -2 + Ny) ; i < (N1+N2 +2*Nr -2 + Ny) + ( Ny - 1) ; i++){
+            int j = i - (N1+N2 +2*Nr -2 + Ny) ; 
+            double y = ymin + (j+1)*dy;
+            double x2 = xmin + (Nx2-Nr+1)*dx;
+            g2_ex(j) = solution_exacte(x2,y);
+            std :: cout << X0[i] << " " << g2_ex(j) << std ::endl ;
+        }
+
+
+        std::cout << "cost avant optimisation : " << cost<< std::endl;
+
         VectorXd Zero = Concatener(Zero1, Zero2); 
 
-        VectorXd Xi = Concatener(U , Zero) ;
+        VectorXd U_xi( (Ny-1)* (N1+N2 + 2*Nr - 2)) ;
+
+        for ( int  i = 0 ; i<(Ny-1)* (N1+N2 + 2*Nr - 2) ; i++){
+            if ( i > (Ny-1)*(N1 -Nr +1) && i <  (Ny-1)*(N1 -Nr +1) + (2*Nr * (Ny -1) )){
+                U_xi[i] = U_ex[i] ;
+            }
+
+            else {
+                 U_xi[i] = 0.;
+            }
+
+        } 
+
+
+
+        // VectorXd Xi = Concatener(U_ex , Zero) ;
+        VectorXd Xi = Concatener(U_xi , Zero) ;
         // VectorXd Xi = U_ex ; 
 
         std::cout << "Dimensions de Xi (SparseMatrix): " << (Xi).rows() << std::endl;
@@ -520,7 +564,7 @@ int main() {
 
         // Revoir la forme de A
         SparseMatrix<double> A = Matrice_globale(I , Matrice_nulle) ;
-         std::cout << "Dimensions de A (SparseMatrix): " << (A).rows() << " x " << (A).cols() << std::endl;
+        //  std::cout << "Dimensions de A (SparseMatrix): " << (A).rows() << " x " << (A).cols() << std::endl;
 
        
         
@@ -530,45 +574,67 @@ int main() {
         std:: cout << "Début de la boucle de l'optimisation" << std :: endl ;
         std::ofstream fichier("resultats.dat");
 
-        while ( Norme_grad > 1e-3){
+        while ( Norme_grad > 1e-6){
             // SparseLU<SparseMatrix<double>> solver;
+
+            double Cost = 0. ; 
+            for ( int i = 1 ; i < 2*(Nr-1) +1; i++){
+                for (int j = 1 ; j<Ny ; j++){
+                    int k1 = (j-1) * (N1+Nr -1) + (i ) + (N1-Nr); 
+                    int k2 = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-1);
+                    // printf("k1 = %d, k2 = %d \n", k1, k2);
+                    Cost += (X0[k1] - X0[k2]) * (X0[k1] - X0[k2]); 
+                    if ( i == 2 && j == 2) {
+                        // std :: cout << X0[k1] << " X0(k1) " << X0[k2] << " X0(k2) " << std :: endl ;
+                    }
+                    
+
+                }
+            }
+
+            // std :: cout << Norme_grad << " " << iter << " " << Cost << std :: endl ;
 
             SparseMatrix<double> Mf_T = Mf * Mf.transpose();
             solver.compute(Mf_T);
 
 
             //  // Affichage des dimensions
-            std::cout << "Dimensions de A (SparseMatrix): " << (A).rows() << " x " << (A).cols() << std::endl;
-            std::cout << "Dimensions de Mf (SparseMatrix): " << (Mf).rows() << " x " << (Mf).cols() << std::endl;
+            // std::cout << "Dimensions de A (SparseMatrix): " << (A).rows() << " x " << (A).cols() << std::endl;
+            // std::cout << "Dimensions de Mf (SparseMatrix): " << (Mf).rows() << " x " << (Mf).cols() << std::endl;
 
             // std::cout << "Dimensions de b (VectorXd): " << Mf.rows() << " x " << Mf.cols() << std::endl;
-            std::cout << "Dimensions de X0 (VectorXd): " << X0.rows() << std::endl;
-            std::cout << "Dimensions de Xi (VectorXd): " << Xi.rows() << std::endl;
+            // std::cout << "Dimensions de X0 (VectorXd): " << X0.rows() << std::endl;
+            // std::cout << "Dimensions de Xi (VectorXd): " << Xi.rows() << std::endl;
 
             VectorXd SM = Mf * (A* X0 - Xi) ; 
 
             
             VectorXd lambda = solver.solve(SM);
+    
 
             VectorXd Grad = A * X0 - Xi - Mf.transpose() * lambda ;
+            
+            
+            // VectorXd Test = Mf * Grad ;
+            // std ::cout << Test.norm() << " doit etre nulle " << std :: endl ;
+
             Norme_grad = Grad.norm() ;
-            if (Norme_grad > 1e-3){
-                X0 = X0 - 1e1 * Grad ; 
-            }
-
-            double Cost = 0. ; 
-            for ( int i = 2 ; i < 2*Nr ; i++){
-                for (int j = 1 ; j<Ny ; j++){
-                    int k1 = (j-1) * (N1+Nr -1) + (i - 1) + (N1-Nr - 1); 
-                    int k2 = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-1);
-                    Cost += (X0[k1] - X0[k2]) * (X0[k1] - X0[k2]); 
-
-                }
-            }
-
             std :: cout << Norme_grad << " " << iter << " " << Cost << std :: endl ;
+            if (Norme_grad > 1e-3){
+                X0 = X0 - 1e-1 * Grad ; 
+            }
+
+            for ( int i = (N1+N2 +2*Nr -2 + Ny) ; i < (N1+N2 +2*Nr -2 + Ny) + ( Ny - 1) ; i++){
+                int j = i - (N1+N2 +2*Nr -2 + Ny) ; 
+                double y = ymin + (j+1)*dy;
+                double x2 = xmin + (Nx2-Nr+1)*dx;
+                g2_ex(j) = solution_exacte(x2,y);
+                // std :: cout << X0[i] << " " << g2_ex(j) << std ::endl ;
+            }
+
+            
             fichier << iter << " " << Norme_grad << std::endl; 
-            Norme_grad = 1e-4 ;
+            // Norme_grad = 1e-4 ;
             iter += 1 ;
 
             // Eigen::VectorXd U1 = x1.segment(0, (Nx1 + Nr-1) * (Ny-1)); 
