@@ -60,45 +60,45 @@ VectorXd second_membre(int Nx, int Ny, double dx, double dy) {
 }
 
 // prise en compte de g1 et g2 
-// Construction du second membre pour la mÃ©thode de Schwarz
+// Construction du second membre pour la mÃƒÂ©thode de Schwarz
 VectorXd second_membre_schwarz(int Nx, int Ny, double dx, double dy, int Nr, int domain, const VectorXd& g1, const VectorXd& g2) {
     int *N = charge(Nx);
     int Nx1 = N[0], Nx2 = N[1];
     
     if (domain == 1) {
         // Domaine 1 (gauche)
-        VectorXd B1((Nx1 + Nr-1) * (Ny-1));  // Correction de la dimension
+        VectorXd B((Nx1 + Nr-1) * (Ny-1));  // Correction de la dimension
         for (int j = 1; j < Ny; ++j) {
             for (int i = 1; i < Nx1 + Nr; ++i) {
                 double x = xmin + i * dx;
                 double y = ymin + j * dy;
                 int k = (j-1) * (Nx1 + Nr-1) + i-1;  // Correction de l'indice
-                B1(k) = source_terme(x, y);
+                B(k) = source_terme(x, y);
                 
-                // Condition Ã  l'interface droite
+                // Condition Ãƒ  l'interface droite
                 if (i == Nx1 + Nr - 1) {
-                    B1(k) = -g1(j-1)/(dx*dx);  // Correction de l'indice
+                    B(k) += -g1(j-1)/(dx*dx);  // Correction de l'indice
                 }
             }
         }
-        return B1;
+        return B;
     } else {
         // Domaine 2 (droite)
-        VectorXd B2((Nx-Nx2+ Nr-1) * (Ny-1));  // Correction de la dimension
+        VectorXd B((Nx-Nx2+ Nr-1) * (Ny-1));  // Correction de la dimension
         for (int j = 1; j < Ny; ++j) {
             for (int i = Nx2-Nr+1; i < Nx; ++i) {
                 double x = xmin + i * dx;
                 double y = ymin + j * dy;
                 int k = (j-1) * (Nx-Nx2 + Nr-1) + (i-Nx2+Nr-1);
-                B2(k) = source_terme(x, y);
+                B(k) = source_terme(x, y);
                 
-                // Condition Ã  l'interface gauche
+                // Condition Ãƒ  l'interface gauche
                 if (i == Nx2-Nr+1) {
-                    B2(k) = -g2(j-1)/(dx*dx);  // Correction de l'indice
+                    B(k) += -g2(j-1)/(dx*dx);  // Correction de l'indice
                 }
             }
         }
-        return B2;
+        return B;
     }
 }
 
@@ -109,10 +109,44 @@ VectorXd Concatener(const VectorXd& u1, const VectorXd& u2) {
     u << u1, u2; // Concatenation directe avec Eigen
     return u;
 }
-// Décomposition LU
+
+double calcul_erreur_L2(const VectorXd& u_num, int Ny, int domain, int Nr, double dx, double dy, int Nx_total) {
+    double error = 0.0;
+    int *N = charge(Nx_total);
+    int Nx1 = N[0];
+    int Nx2 = N[1];
+    
+    if (domain == 1) {
+        for(int j = 1; j < Ny; ++j) {
+            for(int i = 1; i < Nx1 + Nr; ++i) {
+                double x = xmin + i*dx;
+                double y = ymin + j*dy;
+                double u_exact = solution_exacte(x, y);
+                int k = (j-1) * (Nx1 + Nr-1) + i-1;  // Correction de l'indice
+                if (k < u_num.size()) {  // VÃ©rification de l'indice
+                    error += pow(u_num(k) - u_exact, 2);
+                }
+            }
+        }
+    }
+    else {
+        for(int j = 1; j < Ny; ++j) {
+            for(int i = Nx2 - Nr + 1; i < Nx_total; ++i) {
+                double x = xmin + i*dx;
+                double y = ymin + j*dy;
+                double u_exact = solution_exacte(x, y);
+                int k = (j-1) * (Nx_total-Nx2 + Nr-1) + (i-Nx2+Nr-1);
+                if (k < u_num.size()) {  // VÃ©rification de l'indice
+                    error += pow(u_num(k) - u_exact, 2);
+                }
+            }
+        }
+    }
+    return sqrt(error * dx * dy);
+}
 
 
-// Résolution du système AU = b(alpha)
+// RÃ©solution du systÃ¨me AU = b(alpha)
 VectorXd solve_system(const SparseLU<SparseMatrix<double>>& lu, const VectorXd& b) {
     return lu.solve(b);
 }
@@ -125,8 +159,8 @@ double compute_I(const VectorXd& U, int Nx ,int Nr, int Ny) {
     int N1 = Ns[0];
     int N2 = Nx- Ns[1] ;
     
-    for(int j=1; j< Ny -1; ++j){
-        for (int i = 2; i < 2* Nr; i++)
+    for(int j=1; j< Ny; ++j){
+        for (int i = 1; i < 2* Nr; i++)
         {
             k1=(j-1)*(N1+Nr-1)+(i-1)+(N1-Nr);
             k2=(N1+Nr-1)*(Ny-1)+(j-1)*(N2+Nr-1)+(i-1);
@@ -147,141 +181,258 @@ VectorXd compute_G(const SparseLU<SparseMatrix<double>>& solver1,
     VectorXd G(n1+n2);
     
     double I_current = compute_I(U,Nx,Nr,Ny);
-    VectorXd alpha_eps1 = alpha1;
-    VectorXd alpha_eps2 = alpha2;
-    for (int p = 0; p < n1; p++)
-    {
-        alpha_eps1[p] = alpha_eps1[p] +eps ;
-    }
+    
+    for (int p = 0; p < n1+n2; p++)
+    {   if (p<n1)
+        {   VectorXd alpha_eps1 = alpha1;
+            VectorXd alpha_eps2 = alpha2;
+            //alpha_eps2[] = alpha_eps2[m] +eps ;
+            alpha_eps1[p] = alpha_eps1[p] +eps ;
+            VectorXd f1_eps = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha_eps1, alpha_eps2);
+            VectorXd f2_eps = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha_eps1, alpha_eps2);
+            
+            VectorXd U1_eps = solve_system(solver1, f1_eps);
+            VectorXd U2_eps = solve_system(solver2, f2_eps);
+            VectorXd U_eps=Concatener(U1_eps,U2_eps);
 
-    for (int p = 0; p < n2; p++)
-    {
-        alpha_eps2[p] = alpha_eps2[p] +eps ;
-    }
+            double I_plus = compute_I(U_eps,Nx,Nr,Ny);
+            G(p) = (I_plus - I_current) / eps;
+        }
+        else
+        {
+            VectorXd alpha_eps1 = alpha1;
+            VectorXd alpha_eps2 = alpha2;
+            alpha_eps2[p-n1] = alpha_eps2[p-n1] +eps ;
+            VectorXd f1_eps = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha_eps1, alpha_eps2);
+            VectorXd f2_eps = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha_eps1, alpha_eps2);
+            
+            VectorXd U1_eps = solve_system(solver1, f1_eps);
+            VectorXd U2_eps = solve_system(solver2, f2_eps);
+            VectorXd U_eps=Concatener(U1_eps,U2_eps);
 
-    for (int i = 0; i < n1+n2; ++i) {
+            double I_plus = compute_I(U_eps,Nx,Nr,Ny);
+            G(p) = (I_plus - I_current) / eps;
+        }
         
-        VectorXd f1_eps = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha_eps1, alpha_eps2);
-        VectorXd f2_eps = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha_eps1, alpha_eps2);
-        
-        VectorXd U1_eps = solve_system(solver1, f1_eps);
-        VectorXd U2_eps = solve_system(solver2, f2_eps);
-        VectorXd U_eps=Concatener(U1_eps,U2_eps);
-
-        double I_plus = compute_I(U_eps,Nx,Nr,Ny);
-        G(i) = (I_plus - I_current) / eps;
     }
-    cout<< "G " << G[0] << endl ;
+    // cout<< "G " << G.norm() << endl ;
     return G;
 }
 
-// Critère de convergence
-bool convergence_criteria(const VectorXd& G, double tol = 1e-6) {
+// CritÃ¨re de convergence
+bool convergence_criteria(const VectorXd& G, double tol = 0.0001) {
     return G.norm() < tol;
 }
 
-// Résolution du problème inverse
-// Résolution du problème inverse avec suivi de I
-VectorXd inverse_problem_sensitivity(const SparseLU<SparseMatrix<double>>& solver1,
+// RÃ©solution du problÃ¨me inverse
+// RÃ©solution du problÃ¨me inverse avec suivi de I
+tuple<VectorXd, VectorXd, VectorXd, VectorXd> inverse_problem_sensitivity(const SparseLU<SparseMatrix<double>>& solver1,
                                      const SparseLU<SparseMatrix<double>>& solver2,
-                                     const SparseMatrix<double>& A1,
-                                     const SparseMatrix<double>& A2,
+                                     VectorXd f1,
+                                     VectorXd f2,
                                      VectorXd alpha1,
                                      VectorXd alpha2,
                                      int Nx, int Ny, int Nr, double dx, double dy,
-                                     int max_iter = 1000, double tol = 1e-6, double sigma = 0.01) {
+                                     int max_iter = 1000, double tol = 1.e-6, double sigma = 0.1) {
     int n1 = alpha1.size();
     int n2 = alpha2.size();
-    VectorXd alpha_old;
+    VectorXd alpha_old , U1, U2 ,U;
     
-    // Ouvrir le fichier pour écrire les valeurs de I
+    // Ouvrir le fichier pour Ã©crire les valeurs de I
     ofstream file_I("valeurs_I.txt");
     if (!file_I.is_open()) {
         cerr << "Erreur: Impossible d'ouvrir le fichier valeurs_I.txt" << endl;
         throw runtime_error("Erreur d'ouverture de fichier");
     }
     
-    // Écrire l'en-tête du fichier
+    // Ã‰crire l'en-tÃªte du fichier
     file_I << "# Iteration\tValeur de I" << endl;
     
     for (int iter = 0; iter < max_iter; ++iter) {
-        VectorXd f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha1, alpha2);
-        VectorXd f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha1, alpha2);
+        U1 = solve_system(solver1, f1); //gauche
+        U2 = solve_system(solver2, f2); //droite
+        U = Concatener(U1, U2);
         
-        VectorXd U1 = solve_system(solver1, f1);
-        VectorXd U2 = solve_system(solver2, f2);
-        VectorXd U = Concatener(U1, U2);
-        
-        // Calculer I pour cette itération
+        // // Calculer I pour cette itÃ©ration
         double I_current = compute_I(U, Nx, Nr, Ny);
         
-        // Écrire dans le fichier
+        // Ã‰crire dans le fichier
         file_I << iter << "\t" << I_current << endl;
         
-        VectorXd alpha = Concatener(alpha1, alpha2);
+        // VectorXd alpha = Concatener(alpha1, alpha2);
         VectorXd G = compute_G(solver1, solver2, alpha1, alpha2, Nx, Ny, Nr, dx, dy, U);
 
-        if (convergence_criteria(G, tol)) {
-            cout << "Convergence atteinte après " << iter + 1 << " itérations." << endl;
+        if (convergence_criteria(G)) {
+            cout << "Convergence atteinte aprÃ¨s " << iter + 1 << " itÃ©rations." << endl;
             
-            // Écrire la valeur finale de I
+            // f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha1, alpha2);
+            // f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha1, alpha2);
+            
+            // U1 = solve_system(solver1, f1);
+            // U2 = solve_system(solver2, f2);
+
+            // Ã‰crire la valeur finale de I
             file_I << "# Convergence atteinte" << endl;
-            file_I << iter + 1 << "\t" << I_current << endl;
+            // file_I << iter + 1 << "\t" << I_current << endl;
             break;
         }
         else {
-            alpha1 -= sigma * G.head(n1);
-            alpha2 -= sigma * G.tail(n2);
+            alpha1 = alpha1 - sigma * G.head(n1);
+            alpha2 = alpha2 - sigma * G.tail(n2);
+            cout<< "alpha1 " << alpha1.norm() << endl ;
+            f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha1, alpha2);
+            f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha1, alpha2);
+
         }
     }
     
     // Fermer le fichier
     file_I.close();
     
-    return alpha1, alpha2;
-}
+    return make_tuple(alpha1, alpha2, U1, U2);
+    }
 int main() {
-    int Nx=10,Ny=10;
-    int Nr = 2;
-    int *Ns = charge(Nx);
-    int Nx1 = Ns[0];
-    int Nx2 = Ns[1];
-    int N1=Nx1, N2=Nx-Nx2;
-    // vectorXd u, derive_I_U,lambda;
-    
-    double dx = (xmax - xmin) / (Nx);
-    double dy = (ymax - ymin) / (Ny);
-    double h = max(dx, dy);
-    
-    double alpha = -2.0 * (1.0/(dx*dx) + 1.0/(dy*dy));
-    double beta = 1.0 / (dy * dy);
-    double gamma = 1.0 / (dx * dx);
-    
-    // Initialisation des matrices
-    SparseMatrix<double> A1 = Matrice(N1+Nr, Ny, alpha, beta, gamma);
-    SparseMatrix<double> A2 = Matrice(N2+Nr, Ny, alpha, beta, gamma);
-    
-      
-    
-    // SparseMatrix<double> A=Matrice_globale(A1,A2);
+    vector<int> N_values = {40};
+    // vector<int> N_values = {10};
+    ofstream convergence1("convergence_domaine1.txt");
+    ofstream convergence2("convergence_domaine2.txt");
 
-    //Décomposition LU
-    SparseLU<SparseMatrix<double>> solver1, solver2;
-    solver1.compute(A1);
-    solver2.compute(A2);
-    
-    //initialisation de alpha1 et alpha2
-    VectorXd alpha_vec1 = VectorXd::Random(Ny-1); //g1
-    VectorXd alpha_vec2 = VectorXd::Random(Ny-1); //g2
-    // VectorXd U_exact1 = second_membre(N1, N1, (xmax - xmin) / n, (ymax - ymin) / n).array() / (-4.0);
-    
-    //initialisation des seconds membres
-    VectorXd f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha_vec1, alpha_vec2);
-    VectorXd f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha_vec1, alpha_vec2);
-    // VectorXd f =Concatener(f1,f2);
+    ofstream solution1("solution_domain1.txt");
+    ofstream solution2("solution_domain2.txt");
 
-    VectorXd alpha_solution = inverse_problem_sensitivity(solver1,solver2, A1, A2 , alpha_vec1, alpha_vec2, Nx , Ny ,Nr ,dx,dy);
+    ofstream exact1("exact_domain1.txt");
+    ofstream exact2("exact_domain2.txt");
+
     
-    cout << "Solution alpha :\n" << alpha_solution << endl;
+    double previous_h = 0;
+    double previous_error1 = 0;
+    double previous_error2 = 0;
+
+    for(int N : N_values) {
+        int Nx = N, Ny = N;
+        int Nr = 2;
+        int *Ns = charge(Nx);
+        int Nx1 = Ns[0];
+        int Nx2 = Ns[1];
+        int N1=Nx1, N2=Nx-Nx2;
+        cout << "N1 " << Nx1 << " N2 "<< N2 << endl;
+        // vectorXd u, derive_I_U,lambda;
+    
+        double dx = (xmax - xmin) / (Nx);
+        double dy = (ymax - ymin) / (Ny);
+        double h = max(dx, dy);
+    
+        double alpha = -2.0 * (1.0/(dx*dx) + 1.0/(dy*dy));
+        double beta = 1.0 / (dy * dy);
+        double gamma = 1.0 / (dx * dx);
+    
+        // Initialisation des matrices
+        SparseMatrix<double> A1 = Matrice(N1+Nr, Ny, alpha, beta, gamma);
+        SparseMatrix<double> A2 = Matrice(N2+Nr, Ny, alpha, beta, gamma);
+        
+        
+        
+        // SparseMatrix<double> A=Matrice_globale(A1,A2);
+
+        //DÃ©composition LU
+        SparseLU<SparseMatrix<double>> solver1, solver2;
+        solver1.compute(A1);
+        solver2.compute(A2);
+        
+        //initialisation de alpha1 et alpha2
+        VectorXd alpha_vec1 = VectorXd::Random(Ny-1); //g1
+        VectorXd alpha_vec2 = VectorXd::Random(Ny-1); //g2
+        // VectorXd alpha_vec1(Ny-1), alpha_vec2(Ny-1);  
+        // for (int j = 1; j < Ny; ++j) {
+        //     double x1 = xmin + (Nx1+Nr-1)*dx;
+        //     double y = ymin + j*dy;
+        //     alpha_vec1(j-1) = solution_exacte(x1,y);
+        //     // alpha_vec1(j-1) = 0.;
+        //     double x2 = xmin + (Nx2-Nr+1)*dx;
+        //     alpha_vec2(j-1) = solution_exacte(x2,y);
+        //     // alpha_vec2(j-1) = 0.;
+        // }
+        // VectorXd U_exact1 = second_membre(N1, N1, (xmax - xmin) / n, (ymax - ymin) / n).array() / (-4.0);
+        
+        //initialisation des seconds membres
+        VectorXd f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha_vec1, alpha_vec2);
+        VectorXd f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha_vec1, alpha_vec2);
+        // VectorXd f =Concatener(f1,f2);
+
+        auto [alpha_solution1, alpha_solution2, U_solution1, U_solution2] =inverse_problem_sensitivity(solver1, solver2, f1, f2, alpha_vec1, alpha_vec2, Nx, Ny, Nr, dx, dy);
+        double error1 = calcul_erreur_L2(U_solution1, Ny, 1, Nr, dx, dy, Nx); 
+        double error2 = calcul_erreur_L2(U_solution2, Ny, 2, Nr, dx, dy, Nx);
+
+        if(previous_h > 0) {
+            double slope1 = log10(error1/previous_error1) / log10(h/previous_h);
+            cout << "\tPente: " << slope1;
+        }
+        cout << endl;
+        
+        if(previous_h > 0) {
+            double slope2 = log10(error2/previous_error2) / log10(h/previous_h);
+            cout << "\tPente: " << slope2;
+        }
+        cout << endl;
+        // Sauvegarde pour le tracÃ©
+        convergence1 << log10(h) << " " << log10(error1) << endl;
+        convergence2 << log10(h) << " " << log10(error2) << endl;
+        
+        previous_h = h;
+        previous_error1 = error1;
+        previous_error2 = error2;
+
+        // Pour le domaine 2
+        for(int j = 1; j < Ny; ++j) {
+            for(int i = 1; i < Nx1+Nr; ++i) {
+                double x = xmin + (i+Nx2-Nr)*dx;
+                double y = ymin + (j)*dy;
+                int k = (j-1) * (Nx1 + Nr-1) + i-1;
+                solution2 << x << " " << y << " " << U_solution2[k] << endl;
+            }
+            solution2 << endl; // Pour gnuplot splot
+        }
+
+        // // Pour le domaine 1
+        for(int j = 1; j < Ny; ++j) {
+            for(int i = 1; i < N2+Nr ; ++i) {
+                double x = xmin + i*dx;
+                double y = ymin + j*dy;
+                int k = (j-1) * (Nx1 + Nr-1) + i-1;
+                solution1 << x << " " << y << " " << U_solution1[k] << endl;
+            }
+            solution1 << endl;
+        }
+        
+        // Solution exacte U
+        for(int j = 1; j < Ny; ++j) {
+            for(int i = 1; i < Nx1+Nr; ++i) {
+                double x = xmin + i*dx;
+                double y = ymin + j*dy;
+                int k = (j-1) * (Nx1 + Nr-1) + i-1;
+                exact1 << x << " " << y << " " << solution_exacte(x,y) << endl;
+            }
+            exact1 << endl;
+        }
+
+        for(int j = 1; j < Ny; ++j) {
+            for(int i = Nx2-Nr+1; i < Nx; ++i) {
+                double x = xmin + i*dx;
+                double y = ymin + j*dy;
+                int k = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-Nx2+Nr-1);
+                exact2 << x << " " << y << " " << solution_exacte(x,y) << endl;
+            }
+            exact2 << endl;
+        }
+        
+        exact1.close();
+        exact2.close();
+        solution1.close();
+        solution2.close();
+        
+    }
+    convergence1.close();
+    convergence2.close();
+    
     return 0;
 }
