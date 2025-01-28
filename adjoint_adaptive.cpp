@@ -153,7 +153,6 @@ double I(VectorXd U, int N1, int N2,int Nr, int Ny)
             k1 = (j-1) * (N1+Nr -1) + (i -1) + (N1-Nr+1);
             k2 = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-1);  
             r+=(U[k1]-U[k2])*(U[k1]-U[k2]);  
-            // printf("k1 = %d, k2 = %d\n",k1,k2);         
         }        
     }
     return r;
@@ -165,15 +164,7 @@ VectorXd dI_dU(VectorXd  U,int N1, int N2, int Ny, int Nr){
     VectorXd der(taille_globale);
     der.setConstant(0.0);
     int k1,k2;
-    // for(int j=1; j<Ny; ++j){
-    //     for (int i = 1; i < 2*Nr-1; i++)
-    //     {
-    //         k1 = (j-1) * (N1+Nr -1) + (i -1) + (N1-Nr+1);
-    //         k2 = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-1);
-    //         der[k1]=2*(U[k1]-U[k2]);
-    //         der[k2]=-2*(U[k1]-U[k2]);            
-    //     }        
-    // }
+    
     for (int j = 1; j < Ny; j++) {
             for (int i = 1; i < N1 + Nr; ++i) {
                 if (i >= N1+1 - Nr + 1 && i < N1 + Nr) {
@@ -266,7 +257,7 @@ SparseMatrix<double> Jacob2(int N2, int nr, int Ny, double beta)
 {
     int taille_ligne = (N2 + nr-1) * (Ny - 1);
     int taille_colonne = (Ny - 1);
-    printf("taille_ligne %d, taille_colone %d\n", taille_ligne, taille_colonne);
+    // printf("taille_ligne %d, taille_colone %d\n", taille_ligne, taille_colonne);
     SparseMatrix<double> J(taille_ligne, taille_colonne); 
     std::vector<Triplet<double>> coefficients; 
 
@@ -282,43 +273,7 @@ SparseMatrix<double> Jacob2(int N2, int nr, int Ny, double beta)
     return J;
 }
 
-// SparseMatrix<double> construireJacobienne(int N1, int N2, int nr, int Ny, double beta) {
-//     // Dimensions
-//     int taille_ligne = (N1 + N2 + 2 * nr-2) * (Ny - 1);
-//     int taille_colonne = 2 * (Ny - 1);
-//     printf("taille_ligne %d, taille_colone %d\n", taille_ligne, taille_colonne);
-//     SparseMatrix<double> J(taille_ligne, taille_colonne); 
-//     std::vector<Triplet<double>> coefficients; 
 
-//     // Remplissage pour les Ny-1 premières lignes    
-//     for(int ligne=N1+nr-2; ligne<(Ny - 1)*(N1+nr-1); ligne+=N1+nr-1){
-//         int colonne = ligne/(N1+nr-1);              
-//         if (colonne < Ny - 1) { 
-//             coefficients.emplace_back(ligne, colonne, -beta);
-//             std::cout << "Ajout 1ème bloc : ligne = " << ligne << ", colonne = " << colonne << ", valeur = " << -beta << "\n";
-//         }
-//     }
-//     int colonne;
-//     // Remplissage du second bloc
-//      for(int ligne=(N1+nr-1)*(Ny-1); ligne<(Ny - 1)*(N1+N2+2*nr-2); ligne+=N2+nr-1){
-//         // if(ligne==(N1+nr-1)*(Ny-1))
-//         // {
-//         //     colonne=ligne/(N1+nr-1);
-//         // }
-//         // else{
-//             colonne = ((ligne-(N1+nr-1))/(N2+nr-1))+1; 
-//             // printf("colonne %d\n", colonne);
-//         // }
-         
-//         if (colonne < 2 * (Ny - 1)) { // Vérification de la validité de la colonne
-//             coefficients.emplace_back(ligne, colonne, -beta);
-//             std::cout << "Ajout 2ème bloc : ligne = " << ligne << ", colonne = " << colonne << ", valeur = " << -beta << "\n";
-//         }
-//     }
-//     // Construction de la matrice à partir des triplets
-//     J.setFromTriplets(coefficients.begin(), coefficients.end());
-//     return J;
-// }
 
 SparseMatrix<double> construireJacobienne(int N1, int N2, int nr, int Ny, double beta) {
     // Construction des matrices J1 et J2
@@ -398,6 +353,7 @@ VectorXd algo_adjoint(const SparseLU<SparseMatrix<double>>& solver,
     file_I << "# Iteration\tValeur de I" << endl;
    
     double loss=10;
+    double loss_Old=20;
     int iter=0;
     printf("je suis pas dans la boucle while");
     while (loss>epsilon)
@@ -429,8 +385,27 @@ VectorXd algo_adjoint(const SparseLU<SparseMatrix<double>>& solver,
             g=g-nu*grad;
             g1=g.head(Ny-1);
             g2=g.tail(Ny-1);
+
+            // Vérifier la divergence pour construire un pas adaptatif
+            double tol = 1.e-3;
+            if (std::abs(loss - loss_Old) < tol) {
+                nu *= 1.1; 
+                cout << "On augmente le pas " << loss << " " << loss_Old << " " << nu <<endl ;
+                if (nu > 0.7){
+                    cout << "On dépasse le pas max" << endl ;
+                    nu = 0.2 * nu ;
+                }
+            } else {
+                nu *= 0.8; 
+                cout << "On diminue le pas" << loss << " "<< loss_Old << " " << nu << endl ;
+                    if (nu < 0.07){
+                    cout << "On dépasse le pas min" << endl ;
+                    nu = 1.2 * nu ;
+                    }
+            }
         }
         iter+=1;
+        loss_Old = loss;
 
         
     }
@@ -446,8 +421,8 @@ VectorXd algo_adjoint(const SparseLU<SparseMatrix<double>>& solver,
 int main() {
 
 
-    // vector<int> N_values = {20};
-    vector<int> N_values = {10,20,40};
+    vector<int> N_values = {20};
+    // vector<int> N_values = {10,20,40};
     // vector<int> N_values = {10};
     ofstream convergence1("convergence_domaine1.txt");
     ofstream convergence2("convergence_domaine2.txt");
@@ -516,21 +491,6 @@ int main() {
         f =Concatener(f1,f2);
         u = solver.solve(f);
 
-       
-        // VectorXd g1_ex(Ny-1), g2_ex(Ny-1);  
-        // for (int j = 1; j < Ny; ++j) {
-        //     double x1 = xmin + (Nx1+Nr-1)*dx;
-        //     double y = ymin + j*dy;
-        //     g1_ex(j-1) = solution_exacte(x1,y);
-        //     double x2 = xmin + (Nx2-Nr+1)*dx;
-        //     g2_ex(j-1) = solution_exacte(x2,y);
-        // }
-        
-        // f1 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,1,g1_ex,g2_ex);
-        // f2 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,2, g1_ex,g2_ex);
-        // f =Concatener(f1,f2);
-        // u = solver.solve(f);
-
 
         ofstream solution1("solution_domain1.txt");
         ofstream solution2("solution_domain2.txt");
@@ -580,7 +540,6 @@ int main() {
             exact2 << endl;
         }
         double Error_hat = 0;
-        // std::cout << "Error hat = " << (C_hat - C).norm() << std::endl;
 
         int size1 = (N1 + Nr - 1) * (Ny - 1);
         int size2 = (N2 + Nr - 1) * (Ny - 1);

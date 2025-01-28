@@ -64,7 +64,6 @@ VectorXd second_membre(int Nx, int Ny, double dx, double dy) {
 VectorXd second_membre_schwarz(int Nx, int Ny, double dx, double dy, int Nr, int domain, const VectorXd& g1, const VectorXd& g2) {
     int *N = charge(Nx);
     int Nx1 = N[0], Nx2 = N[1];
-    
     if (domain == 1) {
         // Domaine 1 (gauche)
         VectorXd B((Nx1 + Nr-1) * (Ny-1));  // Correction de la dimension
@@ -233,7 +232,7 @@ tuple<VectorXd, VectorXd, VectorXd, VectorXd> inverse_problem_sensitivity(const 
                                      VectorXd alpha1,
                                      VectorXd alpha2,
                                      int Nx, int Ny, int Nr, double dx, double dy,
-                                     int max_iter = 1000, double tol = 1.e-6, double sigma = 0.1) {
+                                     int max_iter = 10000, double tol = 1.e-6, double sigma = 0.1) {
     int n1 = alpha1.size();
     int n2 = alpha2.size();
     VectorXd alpha_old , U1, U2 ,U;
@@ -265,12 +264,6 @@ tuple<VectorXd, VectorXd, VectorXd, VectorXd> inverse_problem_sensitivity(const 
         if (convergence_criteria(G)) {
             cout << "Convergence atteinte aprÃ¨s " << iter + 1 << " itÃ©rations." << endl;
             
-            // f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha1, alpha2);
-            // f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha1, alpha2);
-            
-            // U1 = solve_system(solver1, f1);
-            // U2 = solve_system(solver2, f2);
-
             // Ã‰crire la valeur finale de I
             file_I << "# Convergence atteinte" << endl;
             // file_I << iter + 1 << "\t" << I_current << endl;
@@ -279,7 +272,7 @@ tuple<VectorXd, VectorXd, VectorXd, VectorXd> inverse_problem_sensitivity(const 
         else {
             alpha1 = alpha1 - sigma * G.head(n1);
             alpha2 = alpha2 - sigma * G.tail(n2);
-            cout<< "alpha1 " << alpha1.norm() << endl ;
+            // cout<< "alpha1 " << alpha1.norm() << endl ;
             f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha1, alpha2);
             f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha1, alpha2);
 
@@ -291,8 +284,192 @@ tuple<VectorXd, VectorXd, VectorXd, VectorXd> inverse_problem_sensitivity(const 
     
     return make_tuple(alpha1, alpha2, U1, U2);
     }
+
+
+tuple<VectorXd, VectorXd, VectorXd, VectorXd> inverse_problem_sensitivity_adaptive(
+    const SparseLU<SparseMatrix<double>>& solver1,
+    const SparseLU<SparseMatrix<double>>& solver2,
+    VectorXd f1,
+    VectorXd f2,
+    VectorXd alpha1,
+    VectorXd alpha2,
+    int Nx, int Ny, int Nr, double dx, double dy,
+    int max_iter = 10000, double tol = 1.e-3, double sigma_initial = 0.1, 
+    double sigma_increase_factor = 1.1, double sigma_decrease_factor = 0.5) {
+    
+    int n1 = alpha1.size();
+    int n2 = alpha2.size();
+    VectorXd U1, U2, U, U_old;
+    int *N = charge(Nx);
+    int Nx1 = N[0], Nx2 = N[1];
+
+    // Ouvrir le fichier pour écrire les valeurs de I
+    ofstream file_I("valeurs_I.txt");
+    if (!file_I.is_open()) {
+        cerr << "Erreur: Impossible d'ouvrir le fichier valeurs_I.txt" << endl;
+        throw runtime_error("Erreur d'ouverture de fichier");
+    }
+
+    // Écrire l'en-tête du fichier
+    file_I << "# Iteration\tValeur de I" << endl;
+
+    double sigma = sigma_initial; // initialiser sigma
+    double I_old = 90.; 
+
+    for (int iter = 0; iter < max_iter; ++iter) {
+        U1 = solve_system(solver1, f1); // gauche
+        U2 = solve_system(solver2, f2); // droite
+        U = Concatener(U1, U2);
+
+        // Calculer I pour cette itération
+        double I_current = compute_I(U, Nx, Nr, Ny);
+        
+        // Écrire dans le fichier
+        file_I << iter << "\t" << I_current << endl;
+
+        VectorXd G = compute_G(solver1, solver2, alpha1, alpha2, Nx, Ny, Nr, dx, dy, U);
+
+        if (convergence_criteria(G)) {
+            cout << "Convergence atteinte après " << iter + 1 << " itérations." << endl;
+            file_I << "# Convergence atteinte" << endl;
+            break;
+        } else {
+            VectorXd alpha_old = alpha1; // sauvegarder l'ancienne alpha1
+            alpha1 = alpha1 - sigma * G.head(n1);
+            alpha2 = alpha2 - sigma * G.tail(n2);
+
+            // Vérifier la divergence
+            if (std::abs(I_current - I_old) < tol) {
+            sigma *= 1.1; 
+            cout << "On augmente le pas " << I_current << " " << I_old << " " << sigma <<endl ;
+                if (sigma > 0.7){
+                    cout << "On dépasse le pas max" << endl ;
+                    sigma = 0.2 * sigma ;
+                }
+            } else {
+                sigma *= 0.8; 
+                cout << "On diminue le pas" << I_current << " "<< I_old << " " << sigma << endl ;
+                    if (sigma < 0.07){
+                    cout << "On dépasse le pas min" << endl ;
+                    sigma = 1.2 * sigma ;
+                    }
+
+            }
+
+            // Mettre à jour U_old pour la prochaine itération
+            U_old = U;
+            I_old = I_current ;
+
+            // Mettre à jour les vecteurs f1 et f2
+            f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha1, alpha2);
+            f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha1, alpha2);
+        }
+    }
+
+    // Fermer le fichier
+    file_I.close();
+
+    return make_tuple(alpha1, alpha2, U1, U2);
+}
+
+
+tuple<VectorXd, VectorXd, VectorXd, VectorXd> inverse_problem_sensitivity_adaptive_armijo(
+    const SparseLU<SparseMatrix<double>>& solver1,
+    const SparseLU<SparseMatrix<double>>& solver2,
+    VectorXd f1,
+    VectorXd f2,
+    VectorXd alpha1,
+    VectorXd alpha2,
+    int Nx, int Ny, int Nr, double dx, double dy,
+    int max_iter = 10000, double tol = 1.e-3, double sigma_initial = 0.1, 
+    double alpha = 0.1, double beta = 0.5) {
+    
+    int n1 = alpha1.size();
+    int n2 = alpha2.size();
+    VectorXd U1, U2, U, U_old;
+    int *N = charge(Nx);
+    int Nx1 = N[0], Nx2 = N[1];
+
+    // Ouvrir le fichier pour écrire les valeurs de I
+    ofstream file_I("valeurs_I.txt");
+    if (!file_I.is_open()) {
+        cerr << "Erreur: Impossible d'ouvrir le fichier valeurs_I.txt" << endl;
+        throw runtime_error("Erreur d'ouverture de fichier");
+    }
+
+    // Écrire l'en-tête du fichier
+    file_I << "# Iteration\tValeur de I" << endl;
+
+    double sigma = sigma_initial; // initialiser sigma
+    double I_old = 90.; 
+    VectorXd U_new (n1 + n2) ;
+
+    for (int iter = 0; iter < max_iter; ++iter) {
+        U1 = solve_system(solver1, f1); // gauche
+        U2 = solve_system(solver2, f2); // droite
+        U = Concatener(U1, U2);
+
+        // Calculer I pour cette itération
+        double I_current = compute_I(U, Nx, Nr, Ny);
+        
+        // Écrire dans le fichier
+        file_I << iter << "\t" << I_current << endl;
+
+        VectorXd G = compute_G(solver1, solver2, alpha1, alpha2, Nx, Ny, Nr, dx, dy, U);
+
+        if (convergence_criteria(G)) {
+            cout << "Convergence atteinte après " << iter + 1 << " itérations." << endl;
+            file_I << "# Convergence atteinte" << endl;
+            break;
+        } else {
+            VectorXd alpha_old = alpha1; // sauvegarder l'ancienne alpha1
+            alpha1 = alpha1 - sigma * G.head(n1);
+            alpha2 = alpha2 - sigma * G.tail(n2);
+
+
+            for ( int i = 0 ; i< (n1+n2) ; i++){
+                U_new[i] = U[i] + (sigma) * G[i];
+            }
+            double I_new = 0.;
+            // compute_I(U_new, Nx, Nr, Ny);
+            
+
+            // Vérifier la divergence
+            if (I_new < I_current) {
+            sigma *= 1; 
+            cout << "On augmente le pas " << I_current << " " << I_old << " " << sigma <<endl ;
+                // if (sigma > 0.7){
+                //     cout << "On dépasse le pas max" << endl ;
+                //     sigma = 0.2 * sigma ;
+                // }
+            } else {
+                sigma *= 0.8; 
+                cout << "On diminue le pas" << I_current << " "<< I_old << " " << sigma << endl ;
+                    // if (sigma < 0.07){
+                    // cout << "On dépasse le pas min" << endl ;
+                    // sigma = 1.2 * sigma ;
+                    // }
+
+            }
+
+            // Mettre à jour U_old pour la prochaine itération
+            U_old = U;
+            I_old = I_current ;
+
+            // Mettre à jour les vecteurs f1 et f2
+            f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha1, alpha2);
+            f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha1, alpha2);
+        }
+    }
+
+    // Fermer le fichier
+    file_I.close();
+
+    return make_tuple(alpha1, alpha2, U1, U2);
+}
+
 int main() {
-    vector<int> N_values = {40};
+    vector<int> N_values = {20};
     // vector<int> N_values = {10};
     ofstream convergence1("convergence_domaine1.txt");
     ofstream convergence2("convergence_domaine2.txt");
@@ -316,7 +493,6 @@ int main() {
         int Nx2 = Ns[1];
         int N1=Nx1, N2=Nx-Nx2;
         cout << "N1 " << Nx1 << " N2 "<< N2 << endl;
-        // vectorXd u, derive_I_U,lambda;
     
         double dx = (xmax - xmin) / (Nx);
         double dy = (ymax - ymin) / (Ny);
@@ -332,8 +508,6 @@ int main() {
         
         
         
-        // SparseMatrix<double> A=Matrice_globale(A1,A2);
-
         //DÃ©composition LU
         SparseLU<SparseMatrix<double>> solver1, solver2;
         solver1.compute(A1);
@@ -342,24 +516,16 @@ int main() {
         //initialisation de alpha1 et alpha2
         VectorXd alpha_vec1 = VectorXd::Random(Ny-1); //g1
         VectorXd alpha_vec2 = VectorXd::Random(Ny-1); //g2
-        // VectorXd alpha_vec1(Ny-1), alpha_vec2(Ny-1);  
-        // for (int j = 1; j < Ny; ++j) {
-        //     double x1 = xmin + (Nx1+Nr-1)*dx;
-        //     double y = ymin + j*dy;
-        //     alpha_vec1(j-1) = solution_exacte(x1,y);
-        //     // alpha_vec1(j-1) = 0.;
-        //     double x2 = xmin + (Nx2-Nr+1)*dx;
-        //     alpha_vec2(j-1) = solution_exacte(x2,y);
-        //     // alpha_vec2(j-1) = 0.;
-        // }
-        // VectorXd U_exact1 = second_membre(N1, N1, (xmax - xmin) / n, (ymax - ymin) / n).array() / (-4.0);
+       
         
         //initialisation des seconds membres
         VectorXd f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, alpha_vec1, alpha_vec2);
         VectorXd f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, alpha_vec1, alpha_vec2);
         // VectorXd f =Concatener(f1,f2);
 
-        auto [alpha_solution1, alpha_solution2, U_solution1, U_solution2] =inverse_problem_sensitivity(solver1, solver2, f1, f2, alpha_vec1, alpha_vec2, Nx, Ny, Nr, dx, dy);
+        // auto [alpha_solution1, alpha_solution2, U_solution1, U_solution2] =inverse_problem_sensitivity(solver1, solver2, f1, f2, alpha_vec1, alpha_vec2, Nx, Ny, Nr, dx, dy);
+        // auto [alpha_solution1, alpha_solution2, U_solution1, U_solution2] =inverse_problem_sensitivity_adaptive(solver1, solver2, f1, f2, alpha_vec1, alpha_vec2, Nx, Ny, Nr, dx, dy);
+        auto [alpha_solution1, alpha_solution2, U_solution1, U_solution2] =inverse_problem_sensitivity_adaptive_armijo(solver1, solver2, f1, f2, alpha_vec1, alpha_vec2, Nx, Ny, Nr, dx, dy);
         double error1 = calcul_erreur_L2(U_solution1, Ny, 1, Nr, dx, dy, Nx); 
         double error2 = calcul_erreur_L2(U_solution2, Ny, 2, Nr, dx, dy, Nx);
 
