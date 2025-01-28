@@ -26,10 +26,9 @@ double solution_exacte(double x, double y) {
 int* charge(int Nx) {
     static int N[2];
     N[0] = floor(Nx/2);
-    N[1] = (Nx%2 == 0) ? N[0] : N[0] + 1;
+    N[1] = N[0]+1;
     return N;
 }
-
 // Construction de la matrice
 SparseMatrix<double> Matrice(int Nx, int Ny, double alpha, double beta, double gamma) {
     int N = (Nx-1) * (Ny-1);
@@ -151,10 +150,10 @@ double I(VectorXd U, int N1, int N2,int Nr, int Ny)
     for(int j=1; j<Ny; ++j){
         for (int i = 1; i < 2*Nr-1; i++)
         {
-            k1 = (j-1) * (N1+Nr -1) + (i ) + (N1-Nr);
-            k2 = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-1);
-            // printf("k1 %d k2 %d\n", k1,k2);
-            r+=(U[k1]-U[k2])*(U[k1]-U[k2]);           
+            k1 = (j-1) * (N1+Nr -1) + (i -1) + (N1-Nr+1);
+            k2 = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-1);  
+            r+=(U[k1]-U[k2])*(U[k1]-U[k2]);  
+            // printf("k1 = %d, k2 = %d\n",k1,k2);         
         }        
     }
     return r;
@@ -166,15 +165,29 @@ VectorXd dI_dU(VectorXd  U,int N1, int N2, int Ny, int Nr){
     VectorXd der(taille_globale);
     der.setConstant(0.0);
     int k1,k2;
-    for(int j=1; j<Ny; ++j){
-        for (int i = 1; i < 2*Nr-1; i++)
-        {
-            k1 = (j-1) * (N1+Nr -1) + (i ) + (N1-Nr);
-            k2 = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-1);
-            der[k1]=2*(U[k1]-U[k2]);
-            der[k2]=-2*(U[k1]-U[k2]);            
-        }        
-    }
+    // for(int j=1; j<Ny; ++j){
+    //     for (int i = 1; i < 2*Nr-1; i++)
+    //     {
+    //         k1 = (j-1) * (N1+Nr -1) + (i -1) + (N1-Nr+1);
+    //         k2 = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-1);
+    //         der[k1]=2*(U[k1]-U[k2]);
+    //         der[k2]=-2*(U[k1]-U[k2]);            
+    //     }        
+    // }
+    for (int j = 1; j < Ny; j++) {
+            for (int i = 1; i < N1 + Nr; ++i) {
+                if (i >= N1+1 - Nr + 1 && i < N1 + Nr) {
+                    int k1 = (j-1) * (N1+Nr -1) + (i-(N1+1-Nr+1)) + (N1-Nr+1); 
+                    int k2 = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-(N1+1-Nr+1));
+                    
+                    // printf("k1 = %d, k2 = %d, u k1 %lf , u k2 %lf\n",k1,k2, U[k1], U[k2]); 
+                    der[k1]=2*(U[k1]-U[k2]);
+                   der[k2]=-2*(U[k1]- U[k2]);
+                }
+            }
+        }
+
+
     return der;
 }
 
@@ -189,7 +202,6 @@ VectorXd Concatener(VectorXd u1, VectorXd  u2){
         else{
             u[k]=u2[k-N1];
         }
-        
     } 
     return u;  
 }
@@ -230,12 +242,12 @@ SparseMatrix<double> Matrice_globale(const SparseMatrix<double>& A1, const Spars
     return bigMatrix;
 }
 
-SparseMatrix<double> construireJacobienne(int N1, int N2, int nr, int Ny, double beta) {
-    // Dimensions
-    int taille_ligne = (N1 + N2 + 2 * nr-2) * (Ny - 1);
-    int taille_colonne = 2 * (Ny - 1);
-
-    SparseMatrix<double> J(taille_ligne, taille_colonne); 
+SparseMatrix<double> Jacob1(int N1, int nr, int Ny, double beta)
+{
+    int taille_ligne = (N1 + nr-1) * (Ny - 1);
+    int taille_colonne = (Ny - 1);
+    // printf("taille_ligne %d, taille_colone %d\n", taille_ligne, taille_colonne);
+    SparseMatrix<double> J1(taille_ligne, taille_colonne); 
     std::vector<Triplet<double>> coefficients; 
 
     // Remplissage pour les Ny-1 premières lignes    
@@ -243,28 +255,134 @@ SparseMatrix<double> construireJacobienne(int N1, int N2, int nr, int Ny, double
         int colonne = ligne/(N1+nr-1);              
         if (colonne < Ny - 1) { 
             coefficients.emplace_back(ligne, colonne, -beta);
-            
+            // std::cout << "Ajout 1ème bloc : ligne = " << ligne << ", colonne = " << colonne << ", valeur = " << -beta << "\n";
         }
     }
+    J1.setFromTriplets(coefficients.begin(), coefficients.end());
+    return J1;
+}
 
-    // Remplissage du second bloc
-     for(int ligne=(N1+nr-1)*(Ny-1); ligne<(Ny - 1)*(N1+N2+2*nr-2); ligne+=N2+nr-1){
-        int colonne = (ligne/(N2+nr-1));  
-        if (colonne < 2 * (Ny - 1)) { // Vérification de la validité de la colonne
+SparseMatrix<double> Jacob2(int N2, int nr, int Ny, double beta)
+{
+    int taille_ligne = (N2 + nr-1) * (Ny - 1);
+    int taille_colonne = (Ny - 1);
+    printf("taille_ligne %d, taille_colone %d\n", taille_ligne, taille_colonne);
+    SparseMatrix<double> J(taille_ligne, taille_colonne); 
+    std::vector<Triplet<double>> coefficients; 
+
+    // Remplissage pour les Ny-1 premières lignes    
+    for(int ligne=0; ligne<(Ny - 1)*(N2+nr-1); ligne+=N2+nr-1){
+        int colonne = ligne/(N2+nr-1);              
+        if (colonne < Ny - 1) { 
             coefficients.emplace_back(ligne, colonne, -beta);
             // std::cout << "Ajout 2ème bloc : ligne = " << ligne << ", colonne = " << colonne << ", valeur = " << -beta << "\n";
         }
     }
-    // Construction de la matrice à partir des triplets
     J.setFromTriplets(coefficients.begin(), coefficients.end());
     return J;
 }
-VectorXd inverse_problem_sensitivity(const SparseLU<SparseMatrix<double>>& solver,
+
+// SparseMatrix<double> construireJacobienne(int N1, int N2, int nr, int Ny, double beta) {
+//     // Dimensions
+//     int taille_ligne = (N1 + N2 + 2 * nr-2) * (Ny - 1);
+//     int taille_colonne = 2 * (Ny - 1);
+//     printf("taille_ligne %d, taille_colone %d\n", taille_ligne, taille_colonne);
+//     SparseMatrix<double> J(taille_ligne, taille_colonne); 
+//     std::vector<Triplet<double>> coefficients; 
+
+//     // Remplissage pour les Ny-1 premières lignes    
+//     for(int ligne=N1+nr-2; ligne<(Ny - 1)*(N1+nr-1); ligne+=N1+nr-1){
+//         int colonne = ligne/(N1+nr-1);              
+//         if (colonne < Ny - 1) { 
+//             coefficients.emplace_back(ligne, colonne, -beta);
+//             std::cout << "Ajout 1ème bloc : ligne = " << ligne << ", colonne = " << colonne << ", valeur = " << -beta << "\n";
+//         }
+//     }
+//     int colonne;
+//     // Remplissage du second bloc
+//      for(int ligne=(N1+nr-1)*(Ny-1); ligne<(Ny - 1)*(N1+N2+2*nr-2); ligne+=N2+nr-1){
+//         // if(ligne==(N1+nr-1)*(Ny-1))
+//         // {
+//         //     colonne=ligne/(N1+nr-1);
+//         // }
+//         // else{
+//             colonne = ((ligne-(N1+nr-1))/(N2+nr-1))+1; 
+//             // printf("colonne %d\n", colonne);
+//         // }
+         
+//         if (colonne < 2 * (Ny - 1)) { // Vérification de la validité de la colonne
+//             coefficients.emplace_back(ligne, colonne, -beta);
+//             std::cout << "Ajout 2ème bloc : ligne = " << ligne << ", colonne = " << colonne << ", valeur = " << -beta << "\n";
+//         }
+//     }
+//     // Construction de la matrice à partir des triplets
+//     J.setFromTriplets(coefficients.begin(), coefficients.end());
+//     return J;
+// }
+
+SparseMatrix<double> construireJacobienne(int N1, int N2, int nr, int Ny, double beta) {
+    // Construction des matrices J1 et J2
+    SparseMatrix<double> J1 = Jacob1(N1, nr, Ny, beta);
+    SparseMatrix<double> J2 = Jacob2(N2, nr, Ny, beta);
+    
+    // Dimensions des matrices J1 et J2
+    int rows1 = J1.rows(), cols1 = J1.cols();
+    int rows2 = J2.rows(), cols2 = J2.cols();
+
+    // Vérification des dimensions
+    if (cols1 != cols2 || cols1 != Ny - 1) {
+        throw std::runtime_error("Le nombre de colonnes dans J1 et J2 est incohérent.");
+    }
+
+    // Dimensions de la matrice globale
+    int totalRows = rows1 + rows2;
+    int totalCols = cols1 + cols2; // 2 * (Ny - 1)
+
+    // Création de la matrice globale
+    SparseMatrix<double> BlockMatrix(totalRows, totalCols);
+
+    // Vecteur pour stocker les triplets
+    std::vector<Triplet<double>> coefficients;
+
+    // Ajout des coefficients de J1
+    for (int k = 0; k < J1.outerSize(); ++k) {
+        for (SparseMatrix<double>::InnerIterator it(J1, k); it; ++it) {
+            if (it.row() < rows1 && it.col() < cols1) {
+                coefficients.emplace_back(it.row(), it.col(), it.value());
+            } else {
+                throw std::runtime_error("Indice de J1 hors limites !");
+            }
+        }
+    }
+
+    // Ajout des coefficients de J2
+    for (int k = 0; k < J2.outerSize(); ++k) {
+        for (SparseMatrix<double>::InnerIterator it(J2, k); it; ++it) {
+            int newRow = it.row() + rows1; // Décalage des lignes
+            int newCol = it.col() + cols1; // Décalage des colonnes
+            if (newRow < totalRows && newCol < totalCols) {
+                coefficients.emplace_back(newRow, newCol, it.value());
+            } else {
+                throw std::runtime_error("Indice de J2 hors limites !");
+            }
+        }
+    }
+
+    // Construction de la matrice globale
+    BlockMatrix.setFromTriplets(coefficients.begin(), coefficients.end());
+
+    return BlockMatrix;
+}
+
+
+
+
+VectorXd algo_adjoint(const SparseLU<SparseMatrix<double>>& solver,
                                      const SparseLU<SparseMatrix<double>>& solverAT,
-                                     VectorXd g1,
-                                     VectorXd g2,
+                                     VectorXd& g1,
+                                     VectorXd& g2,
                                      int Nx, int Ny, int Nr,int N1,int N2, double dx, double dy, double beta,
-                                     double epsilon = 1e-6, double nu = 0.01) {
+                                     double epsilon, double nu) {
     VectorXd f1, f2,f;
     VectorXd derive_I_U, lambda, grad;
     VectorXd u,g=Concatener(g1,g2);
@@ -284,7 +402,7 @@ VectorXd inverse_problem_sensitivity(const SparseLU<SparseMatrix<double>>& solve
     printf("je suis pas dans la boucle while");
     while (loss>epsilon)
     {
-        printf("je suis dans la boucle while\n");
+        // printf("je suis dans la boucle while\n");
         f1 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,1,g1,g2);
         f2 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,2, g1,g2);
         f =Concatener(f1,f2);
@@ -317,6 +435,7 @@ VectorXd inverse_problem_sensitivity(const SparseLU<SparseMatrix<double>>& solve
         
     }
     
+    cout << "Convergence atteinte après " << iter + 1 << " itérations." << endl;
     // Fermer le fichier
     file_I.close();
     g=Concatener(g1,g2);
@@ -326,175 +445,182 @@ VectorXd inverse_problem_sensitivity(const SparseLU<SparseMatrix<double>>& solve
 
 int main() {
 
-    int Nx=50,Ny=50;
-    int Nr = 2;
-    int *Ns = charge(Nx);
-    int Nx1 = Ns[0];
-    int Nx2 = Ns[1];
-    int N1=Nx1, N2=Nx-Nx2;
-    printf("N1 %d, N2 %d\n",N1,N2);
-    VectorXd u1((N1+Nr-1)*(Ny-1)), u2((N2+Nr-1)*(Ny-1));
-    VectorXd u, derive_I_U,lambda, f1,f2,f;
 
-    double dx = (xmax - xmin) / (Nx);
-    double dy = (ymax - ymin) / (Ny);
-    double h = max(dx, dy);
-    
-    double alpha = -2.0 * (1.0/(dx*dx) + 1.0/(dy*dy));
-    double beta = 1.0 / (dy * dy);
-    double gamma = 1.0 / (dx * dx);       
+    // vector<int> N_values = {20};
+    vector<int> N_values = {10,20,40};
+    // vector<int> N_values = {10};
+    ofstream convergence1("convergence_domaine1.txt");
+    ofstream convergence2("convergence_domaine2.txt");
+
+    ofstream solution1("solution_domain1.txt");
+    ofstream solution2("solution_domain2.txt");
+
+    ofstream exact1("exact_domain1.txt");
+    ofstream exact2("exact_domain2.txt");
 
     
-    // // Initialisation pour le domaine complet
-    SparseMatrix<double> A1 = Matrice(N1+Nr, Ny, alpha, beta, gamma);
-    SparseMatrix<double> A2 = Matrice(N2+Nr, Ny, alpha, beta, gamma);
-    SparseMatrix<double> A=Matrice_globale(A1,A2);
-    SparseLU<SparseMatrix<double>> solver;
-    solver.compute(A);
-    SparseMatrix<double> AT = A.transpose();
-    SparseLU<SparseMatrix<double>> solverAT;
-    solverAT.compute(AT);
-    VectorXd g1=VectorXd::Random(Ny-1),g2=VectorXd::Random(Ny-1);
-    // for(int j=0;j<Ny-1;j++){
-    //     double x1=xmin+(N1+Nr-1)*dx;
-    //     double x2=xmin+(Nx-(N2+Nr-1))*dx;
-    //     double y=ymin+(j+1)*dy;
-    //     g1[j]=solution_exacte(x1,y);
-    //     g2[j]=solution_exacte(x2,y);
-    // }
-    VectorXd g, grad;    
-    u=Concatener(u1,u2);
-    g=Concatener(g1,g2);
+    double previous_h = 0;
+    double previous_error1 = 0;
+    double previous_error2 = 0;
+    
+    cout << "Analyse de convergence par sous-domaine" << endl;
+    cout << "----------------------------------------" << endl;
+    
+    for(int N : N_values) {
+        int Nx = N, Ny = 6;
+        int Nr = 2;
 
-    double nu=0.2,epsilon=1e-4;
-    g=inverse_problem_sensitivity(solver,solverAT,g1,g2,Nx,Ny,Nr,N1,N2,dx,dy,beta,epsilon,nu);
+    
+        int *Ns = charge(Nx);
+        int Nx1 = Ns[0];
+        int Nx2 = Ns[1];
+        int N1=Nx1, N2=Nx-Nx2;
+        printf("Nx1 %d, Nx2 %d\n",Nx1,Nx2);
+        printf("N1 %d, N2 %d\n",N1,N2);
+        VectorXd u1((Ny-1)*(N1+Nr-1)),u2((Ny-1)*(N2+Nr-1));
+        VectorXd u, derive_I_U,lambda, f1,f2,f;
 
-    // double nu=0.01,epsilon=1e-6;
-    // double loss=1;
-    // // printf("je suis  loss I %lf\n",  loss);
-    // int iter=0;
-    // while( loss>1e-6)
-    // {
-    //     f1 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,1,g1,g2);
-    //     f2 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,2, g1,g2);
-    //     f =Concatener(f1,f2);
-    //     u = solver.solve(f);
+        double dx = (xmax - xmin) / (Nx);
+        double dy = (ymax - ymin) / (Ny);
+        double h = max(dx, dy);
+        
+        double alpha = -2.0 * (1.0/(dx*dx) + 1.0/(dy*dy));
+        double beta = 1.0 / (dy * dy);
+        double gamma = 1.0 / (dx * dx);       
+        int k1,k2,k;
+
+        u=Concatener(u1,u2);
+
+            // // Initialisation pour le domaine complet
+        SparseMatrix<double> A1 = Matrice(N1+Nr, Ny, alpha, beta, gamma);
+        SparseMatrix<double> A2 = Matrice(N2+Nr, Ny, alpha, beta, gamma);
+        SparseMatrix<double> A=Matrice_globale(A1,A2);
+        SparseLU<SparseMatrix<double>> solver, solver1, solver2;
+        solver1.compute(A1);
+        
+        solver2.compute(A2);
+        solver.compute(A);
+
+        SparseMatrix<double> AT = A.transpose();
+        SparseLU<SparseMatrix<double>> solverAT;
+        solverAT.compute(AT);
+        VectorXd g1=VectorXd::Random(Ny-1),g2=VectorXd::Random(Ny-1);
+        VectorXd g;   
+        double nu=0.1,epsilon=1e-6;
+
+        g=algo_adjoint(solver,solverAT,g1,g2,Nx,Ny,Nr,N1,N2,dx,dy,beta,epsilon,nu);
+        g1=g.head(Ny-1);
+        g2=g.tail(Ny-1);
+        f1 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,1,g1,g2);
+        f2 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,2, g1,g2);
+        f =Concatener(f1,f2);
+        u = solver.solve(f);
+
        
-    //     derive_I_U=dI_dU(u,N1,N2,Ny,Nr);
+        // VectorXd g1_ex(Ny-1), g2_ex(Ny-1);  
+        // for (int j = 1; j < Ny; ++j) {
+        //     double x1 = xmin + (Nx1+Nr-1)*dx;
+        //     double y = ymin + j*dy;
+        //     g1_ex(j-1) = solution_exacte(x1,y);
+        //     double x2 = xmin + (Nx2-Nr+1)*dx;
+        //     g2_ex(j-1) = solution_exacte(x2,y);
+        // }
         
-    //     lambda=solverAT.solve(derive_I_U);
+        // f1 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,1,g1_ex,g2_ex);
+        // f2 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,2, g1_ex,g2_ex);
+        // f =Concatener(f1,f2);
+        // u = solver.solve(f);
+
+
+        ofstream solution1("solution_domain1.txt");
+        ofstream solution2("solution_domain2.txt");
+
+        ofstream exact1("exact_domain1.txt");
+        ofstream exact2("exact_domain2.txt");
+        // Pour le domaine 1
+        for(int j = 1; j < Ny; ++j) {
+            for(int i = 1; i < Nx1+Nr; ++i) {
+                double x = xmin + i*dx;
+                double y = ymin + j*dy;
+                int k = (j-1) * (Nx1 + Nr-1) + i-1;
+                solution1 << x << " " << y << " " << u[k] << endl;
+            }
+            solution1 << endl; // Pour gnuplot splot
+        }
+
+        // Pour le domaine 2
+        for(int j = 1; j < Ny; ++j) {
+            for(int i = Nx2-Nr+1; i < Nx; ++i) {
+                double x = xmin + i*dx;
+                double y = ymin + j*dy;
+                int k = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-Nx2+Nr-1);
+                solution2 << x << " " << y << " " << u[k] << endl;
+            }
+            solution2 << endl;
+        }
         
+        // Solution exacte U
+        for(int j = 1; j < Ny; ++j) {
+            for(int i = 1; i < Nx1+Nr; ++i) {
+                double x = xmin + i*dx;
+                double y = ymin + j*dy;
+                int k = (j-1) * (Nx1 + Nr-1) + i-1;
+                exact1 << x << " " << y << " " << solution_exacte(x,y) << endl;
+            }
+            exact1 << endl;
+        }
 
-    //     grad=lambda.transpose()*construireJacobienne(N1,N2,Nr,Ny,beta);
-    //     if (grad.norm()<epsilon){
-    //         break;
-    //     }
-    //     else{
-    //         g=g-nu*grad;
-    //         g1=g.head(Ny-1);
-    //         g2=g.tail(Ny-1);
-    //     }
-    //     loss=I(u,N1,N2,Nr,Ny);
-    //     printf("je suis dans le boucle while, gradient grad %lf, loss I %lf\n", grad.norm(), loss);
-    //     iter+=1;
+        for(int j = 1; j < Ny; ++j) {
+            for(int i = Nx2-Nr+1; i < Nx; ++i) {
+                double x = xmin + i*dx;
+                double y = ymin + j*dy;
+                int k = (N1 + Nr -1) * (Ny -1) + (j-1) * (N2+Nr-1) + (i-Nx2+Nr-1);
+                exact2 << x << " " << y << " " << solution_exacte(x,y) << endl;
+            }
+            exact2 << endl;
+        }
+        double Error_hat = 0;
+        // std::cout << "Error hat = " << (C_hat - C).norm() << std::endl;
 
-    // }
-    // printf("iteration %d", iter);
+        int size1 = (N1 + Nr - 1) * (Ny - 1);
+        int size2 = (N2 + Nr - 1) * (Ny - 1);
+        double error1 = calcul_erreur_L2(u.head(size1), Ny, 1, Nr, dx, dy, Nx); 
+        double error2 = calcul_erreur_L2(u.tail(size2), Ny, 2, Nr, dx, dy, Nx);
+
+        // Affichage des résultats
+        cout << "N = " << N << ", h = " << h << endl;
+        // cout << "Domaine 1 - Erreur L2: " << error1;
+        // cout << "Domaine 2 - Erreur L2: " << error2;
+
+        if(previous_h > 0) {
+            double slope1 = log10(error1/previous_error1) / log10(h/previous_h);
+            cout << "\tPente: " << slope1;
+        }
+        cout << endl;
+        
+        if(previous_h > 0) {
+            double slope2 = log10(error2/previous_error2) / log10(h/previous_h);
+            cout << "\tPente: " << slope2;
+        }
+        cout << endl;
+        
+        // Sauvegarde pour le tracé
+        convergence1 << log10(h) << " " << log10(error1) << endl;
+        convergence2 << log10(h) << " " << log10(error2) << endl;
+        
+        previous_h = h;
+        previous_error1 = error1;
+        previous_error2 = error2;
 
 
-    // vector<int> N_values = {5, 10, 20, 40, 80};
-    // // vector<int> N_values = {5};
-    // ofstream convergence1("convergence_domaine1.txt");
-    // ofstream convergence2("convergence_domaine2.txt");
+        exact1.close();
+        exact2.close();
+        solution1.close();
+        solution2.close();
+    }
     
-    // double previous_h = 0;
-    // double previous_error1 = 0;
-    // double previous_error2 = 0;
-    
-    // cout << "Analyse de convergence par sous-domaine" << endl;
-    // cout << "----------------------------------------" << endl;
-    
-    // for(int N : N_values) {
-    //     int Nx = N, Ny = N;
-    //     int Nr = 2;
-    //     int *Ns = charge(Nx);
-    //     int Nx1 = Ns[0];
-    //     int Nx2 = Ns[1];
-        
-    //     double dx = (xmax - xmin) / (Nx);
-    //     double dy = (ymax - ymin) / (Ny);
-    //     double h = max(dx, dy);
-        
-    //     double alpha = -2.0 * (1.0/(dx*dx) + 1.0/(dy*dy));
-    //     double beta = 1.0 / (dy * dy);
-    //     double gamma = 1.0 / (dx * dx);
-        
-    //     // Initialisation pour le domaine complet
-    //     SparseMatrix<double> A = Matrice(Nx, Ny, alpha, beta, gamma);
-    //     VectorXd f = second_membre(Nx, Ny, dx, dy);
-    //     SparseLU<SparseMatrix<double>> solver;
-    //     solver.compute(A);
-    //     VectorXd u = solver.solve(f);
-        
-    //     // Construction des conditions aux limites pour Schwarz
-    //     VectorXd g1(Ny-1), g2(Ny-1);  // Correction de la dimension
-    //     for (int j = 1; j < Ny; ++j) {
-    //         double x1 = xmin + (Nx1+Nr-1)*dx;
-    //         double y = ymin + j*dy;
-    //         g1(j-1) = solution_exacte(x1,y);
-            
-    //         double x2 = xmin + (Nx2-Nr+1)*dx;
-    //         g2(j-1) = solution_exacte(x2,y);
-    //     }
+    convergence1.close();
+    convergence2.close();
 
-    //     // Résolution sur les sous-domaines
-    //     SparseMatrix<double> A1 = Matrice(Nx1 + Nr, Ny, alpha, beta, gamma);
-    //     SparseMatrix<double> A2 = Matrice(Nx-Nx2+ Nr , Ny, alpha, beta, gamma);
-        
-    //     VectorXd f1 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, g1, g2);
-    //     VectorXd f2 = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, g1, g2);
-        
-    //     SparseLU<SparseMatrix<double>> solver1, solver2;
-    //     solver1.compute(A1);
-    //     solver2.compute(A2);
-        
-    //     VectorXd u1 = solver1.solve(f1);
-    //     VectorXd u2 = solver2.solve(f2);
-        
-    //     // Calcul de l'erreur
-    //     double error1 = calcul_erreur_L2(u1, Ny, 1, Nr, dx, dy, Nx);
-    //     double error2 = calcul_erreur_L2(u2, Ny, 2, Nr, dx, dy, Nx);
-        
-    //     // Affichage des résultats
-    //     cout << "N = " << N << ", h = " << h << endl;
-    //     // cout << "Domaine 1 - Erreur L2: " << error1;
-    //     // cout << "Domaine 2 - Erreur L2: " << error2;
-
-    //     if(previous_h > 0) {
-    //         double slope1 = log10(error1/previous_error1) / log10(h/previous_h);
-    //         cout << "\tPente: " << slope1;
-    //     }
-    //     cout << endl;
-        
-    //     if(previous_h > 0) {
-    //         double slope2 = log10(error2/previous_error2) / log10(h/previous_h);
-    //         cout << "\tPente: " << slope2;
-    //     }
-    //     cout << endl;
-        
-    //     // Sauvegarde pour le tracé
-    //     convergence1 << log10(h) << " " << log10(error1) << endl;
-    //     convergence2 << log10(h) << " " << log10(error2) << endl;
-        
-    //     previous_h = h;
-    //     previous_error1 = error1;
-    //     previous_error2 = error2;
-    // }
-    
-    // convergence1.close();
-    // convergence2.close();
-    // cout << "\nDonnées de convergence écrites dans 'convergence_domaine1.txt'" << endl;
-    // cout << "\nDonnées de convergence écrites dans 'convergence_domaine2.txt'" << endl;
-    
     return 0;
 }
