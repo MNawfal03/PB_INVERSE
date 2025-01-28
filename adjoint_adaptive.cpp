@@ -352,11 +352,11 @@ VectorXd algo_adjoint(const SparseLU<SparseMatrix<double>>& solver,
     // Écrire l'en-tête du fichier
     file_I << "# Iteration\tValeur de I" << endl;
    
-    double loss=10;
+    double loss;
     double loss_Old=20;
     int iter=0;
     printf("je suis pas dans la boucle while");
-    while (loss>epsilon)
+    while (iter<10000)
     {
         // printf("je suis dans la boucle while\n");
         f1 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,1,g1,g2);
@@ -390,16 +390,16 @@ VectorXd algo_adjoint(const SparseLU<SparseMatrix<double>>& solver,
             double tol = 1.e-3;
             if (std::abs(loss - loss_Old) < tol) {
                 nu *= 1.1; 
-                cout << "On augmente le pas " << loss << " " << loss_Old << " " << nu <<endl ;
+                // cout << "On augmente le pas " << loss << " " << loss_Old << " " << nu <<endl ;
                 if (nu > 0.7){
-                    cout << "On dépasse le pas max" << endl ;
+                    // cout << "On dépasse le pas max" << endl ;
                     nu = 0.2 * nu ;
                 }
             } else {
                 nu *= 0.8; 
-                cout << "On diminue le pas" << loss << " "<< loss_Old << " " << nu << endl ;
+                // cout << "On diminue le pas" << loss << " "<< loss_Old << " " << nu << endl ;
                     if (nu < 0.07){
-                    cout << "On dépasse le pas min" << endl ;
+                    // cout << "On dépasse le pas min" << endl ;
                     nu = 1.2 * nu ;
                     }
             }
@@ -421,9 +421,9 @@ VectorXd algo_adjoint(const SparseLU<SparseMatrix<double>>& solver,
 int main() {
 
 
-    vector<int> N_values = {20};
-    // vector<int> N_values = {10,20,40};
-    // vector<int> N_values = {10};
+    // vector<int> N_values = {20};
+    vector<int> N_values = {10,20,40};
+    // vector<int> N_values = {40};
     ofstream convergence1("convergence_domaine1.txt");
     ofstream convergence2("convergence_domaine2.txt");
 
@@ -442,7 +442,7 @@ int main() {
     cout << "----------------------------------------" << endl;
     
     for(int N : N_values) {
-        int Nx = N, Ny = 6;
+        int Nx = N, Ny = N;
         int Nr = 2;
 
     
@@ -490,7 +490,22 @@ int main() {
         f2 = second_membre_schwarz(Nx, Ny, dx, dy,Nr,2, g1,g2);
         f =Concatener(f1,f2);
         u = solver.solve(f);
+        // VectorXd g1(Ny-1), g2(Ny-1);  
+        // for (int j = 1; j < Ny; ++j) {
+        //     double x1 = xmin + (Nx1+Nr-1)*dx;
+        //     double y = ymin + j*dy;
+        //     g1(j-1) = solution_exacte(x1,y);
+        //     double x2 = xmin + (Nx2-Nr+1)*dx;
+        //     g2(j-1) = solution_exacte(x2,y);
+        // }
 
+        // VectorXd f1_ex = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 1, g1, g2);
+        // VectorXd f2_ex = second_membre_schwarz(Nx, Ny, dx, dy, Nr, 2, g1, g2);
+
+        // u1 = solver1.solve(f1_ex);
+        // u2 = solver2.solve(f2_ex);
+
+        // u = Concatener(u1, u2); 
 
         ofstream solution1("solution_domain1.txt");
         ofstream solution2("solution_domain2.txt");
@@ -550,10 +565,10 @@ int main() {
         cout << "N = " << N << ", h = " << h << endl;
         // cout << "Domaine 1 - Erreur L2: " << error1;
         // cout << "Domaine 2 - Erreur L2: " << error2;
-
+        // cout << endl;
         if(previous_h > 0) {
             double slope1 = log10(error1/previous_error1) / log10(h/previous_h);
-            cout << "\tPente: " << slope1;
+            cout << "\tPente: " << slope1 ;
         }
         cout << endl;
         

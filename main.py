@@ -24,8 +24,12 @@ plt.plot(x2, y2, 'ro-', label='Erreur Domaine 2')
 plt.plot(x2, slope2*x2 + intercept2, 'r--', label=f'Pente D2 = {slope2:.2f}')
 
 plt.grid(True)
-plt.xlabel('log10(h)')
-plt.ylabel('log10(erreur)')
+plt.xlabel('log(h)')
+plt.ylabel('log(erreur)')
 plt.legend()
-plt.title('Analyse de convergence - Comparaison des deux domaines')
+plt.title('Analyse de convergence pour chaque domaine - Méthode de l\'équation adjointe')
+
+# Sauvegarde du graphe en tant que fichier PNG
+plt.savefig('analyse_convergence.png', dpi=300)  # Le paramètre dpi ajuste la qualité de l'image
+
 plt.show()
